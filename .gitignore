@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# virtual environments
+venv/
+.env/
+.envrc
+venv-*/
+
+# IDEs
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.idea/
+
+# Logs
+*.log
+
+# Data / model weights (do NOT commit large files)
+data/
+models/
+weights/
+checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets
+secret*.*
+*.key
+*.pem
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
