@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+
+# Virtual environment
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Environment & secrets
+.env
+*.env
+
+# Vector database & session data
+chroma_db/
+sessions/
+
+# Local data / PDFs
+data/**/*.pdf
+data/**/*.PDF
+data/**/*.txt
+
+# Evaluation outputs
+eval/*_filled.csv
+eval/*_metrics.csv
+eval/*.json
+
+# Streamlit cache and logs
+.streamlit/
+.streamlit-cache/
+.streamlit_cache/
+.streamlit_logs/
+
+# Reports / notebooks / temp files
+*.ipynb_checkpoints/
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# IDE settings
+.vscode/
+.idea/
+*.code-workspace
+
+# Dependency files created by tools
+poetry.lock
+Pipfile.lock
+
+# Mac/Linux system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary export / test folders
+exports/
+uploads/
+tests/output/

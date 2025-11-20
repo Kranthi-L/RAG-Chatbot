@@ -1,0 +1,14 @@
+langchain
+langchain-community
+langchain-openai
+anthropic
+chromadb
+pypdf
+unstructured
+python-dotenv
+tiktoken
+rich
+rouge-score
+sacrebleu
+bert-score
+sentence-transformers
