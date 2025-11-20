@@ -47,10 +47,31 @@ def get_vs() -> Chroma:
     return Chroma(persist_directory=DB_DIR)
 
 # -----------------------------------------------------------------------------
+# LLM client caching (Optimization 1: Reuse instances instead of creating new ones)
+# -----------------------------------------------------------------------------
+# Cache GPT LLM instances by temperature to avoid recreating connections
+_gpt_llm_cache: dict[float, ChatOpenAI] = {}
+_claude_client: anthropic.Anthropic | None = None
+
+def get_gpt_llm(temperature: float = 0) -> ChatOpenAI:
+    """Get or create a cached GPT LLM instance for the given temperature."""
+    if temperature not in _gpt_llm_cache:
+        _gpt_llm_cache[temperature] = ChatOpenAI(model="gpt-4o-mini", temperature=temperature)
+    return _gpt_llm_cache[temperature]
+
+def get_claude_client() -> anthropic.Anthropic:
+    """Get or create a cached Claude client instance."""
+    global _claude_client
+    if _claude_client is None:
+        _claude_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    return _claude_client
+
+# -----------------------------------------------------------------------------
 # Backends
 # -----------------------------------------------------------------------------
 def ask_gpt(system: str, question: str, context: str, temperature: float) -> Tuple[str, float]:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=temperature)
+    # Use cached LLM instance instead of creating new one
+    llm = get_gpt_llm(temperature=temperature)
     prompt = ChatPromptTemplate.from_messages([
         ("system", system),
         ("human", "Question: {q}\n\nContext:\n{ctx}")
@@ -72,7 +93,8 @@ def get_claude_candidates() -> List[str]:
     ]
 
 def ask_claude(system: str, question: str, context: str, temperature: float) -> Tuple[str, float]:
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    # Use cached Claude client instead of creating new one
+    client = get_claude_client()
     user_text = f"{system}\n\nQuestion: {question}\n\nContext:\n{context}"
     last_err = None
     for model_id in get_claude_candidates():
@@ -104,12 +126,29 @@ def build_filter(selected_courses: List[str]) -> Optional[dict]:
     return {"course": {"$in": selected_courses}}
 
 def build_context(docs) -> str:
+    """
+    Optimization 5: Build context with length limits to prevent token limit issues.
+    Limits total context to ~8000 characters (roughly 2000 tokens).
+    """
     blocks = []
+    total_chars = 0
+    max_context_chars = 8000  # Conservative limit to stay well under token limits
+    
     for i, d in enumerate(docs, 1):
         src  = d.metadata.get("filename") or os.path.basename(d.metadata.get("source", ""))
         page = d.metadata.get("page", "?")
         course = d.metadata.get("course") or d.metadata.get("book", "unknown")
-        blocks.append(f"[{i}] {d.page_content}\n(Source: {src}, p.{page}, course:{course})")
+        block = f"[{i}] {d.page_content}\n(Source: {src}, p.{page}, course:{course})"
+        
+        # Check if adding this block would exceed limit
+        block_size = len(block) + 2  # +2 for "\n\n" separator
+        if total_chars + block_size > max_context_chars and blocks:
+            # Stop adding chunks if we'd exceed the limit
+            break
+        
+        blocks.append(block)
+        total_chars += block_size
+    
     return "\n\n".join(blocks)
 
 # -----------------------------------------------------------------------------

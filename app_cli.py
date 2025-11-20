@@ -20,11 +20,32 @@ DB_DIR = "chroma_db"
 SYSTEM = open("prompts/qa_system.md").read()
 
 # ---------------------------
+# LLM client caching (Optimization 1: Reuse instances instead of creating new ones)
+# ---------------------------
+# Cache GPT LLM instances by temperature to avoid recreating connections
+_gpt_llm_cache: dict[float, ChatOpenAI] = {}
+_claude_client: anthropic.Anthropic | None = None
+
+def get_gpt_llm(temperature: float = 0) -> ChatOpenAI:
+    """Get or create a cached GPT LLM instance for the given temperature."""
+    if temperature not in _gpt_llm_cache:
+        _gpt_llm_cache[temperature] = ChatOpenAI(model="gpt-4o-mini", temperature=temperature)
+    return _gpt_llm_cache[temperature]
+
+def get_claude_client() -> anthropic.Anthropic:
+    """Get or create a cached Claude client instance."""
+    global _claude_client
+    if _claude_client is None:
+        _claude_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    return _claude_client
+
+# ---------------------------
 # LLM helpers (cheap & tight)
 # ---------------------------
 def _cheap_llm():
     # same small, fast model for meta-tasks (summary / rewrite)
-    return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    # Now uses cached instance instead of creating new one each time
+    return get_gpt_llm(temperature=0)
 
 def summarize_recent(turns, max_chars=1200) -> str:
     """Summarize last few turns into a tiny context for follow-ups."""
@@ -55,6 +76,19 @@ def summarize_recent(turns, max_chars=1200) -> str:
                 return text
         return ""
     
+def is_standalone_question(question: str) -> bool:
+    """
+    Optimization 4: Detect if a question is standalone (doesn't need follow-up processing).
+    Questions starting with common question words are usually standalone.
+    """
+    q_lower = question.strip().lower()
+    standalone_starters = (
+        'what', 'who', 'where', 'when', 'why', 'how', 'explain', 'describe', 
+        'list', 'define', 'tell me about', 'what is', 'what are', 'what does',
+        'compare', 'difference between', 'advantages', 'disadvantages'
+    )
+    return q_lower.startswith(standalone_starters)
+
 def rewrite_question(user_q: str, summary: str) -> str:
     """Rewrite follow-up into standalone question using summary context."""
     if not summary:
@@ -76,16 +110,34 @@ def rewrite_question(user_q: str, summary: str) -> str:
 # Retrieval & generation
 # ---------------------------
 def build_context(docs) -> str:
+    """
+    Optimization 5: Build context with length limits to prevent token limit issues.
+    Limits total context to ~8000 characters (roughly 2000 tokens).
+    """
     blocks = []
+    total_chars = 0
+    max_context_chars = 8000  # Conservative limit to stay well under token limits
+    
     for i, d in enumerate(docs, 1):
         src  = d.metadata.get("filename") or os.path.basename(d.metadata.get("source", ""))
         page = d.metadata.get("page", "?")
         course = d.metadata.get("course") or d.metadata.get("book", "unknown")
-        blocks.append(f"[{i}] {d.page_content}\n(Source: {src}, p.{page}, course:{course})")
+        block = f"[{i}] {d.page_content}\n(Source: {src}, p.{page}, course:{course})"
+        
+        # Check if adding this block would exceed limit
+        block_size = len(block) + 2  # +2 for "\n\n" separator
+        if total_chars + block_size > max_context_chars and blocks:
+            # Stop adding chunks if we'd exceed the limit
+            break
+        
+        blocks.append(block)
+        total_chars += block_size
+    
     return "\n\n".join(blocks)
 
 def ask_gpt(system: str, question: str, context: str, summary: str) -> tuple[str, float]:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    # Use cached LLM instance instead of creating new one
+    llm = get_gpt_llm(temperature=0)
     prompt = ChatPromptTemplate.from_messages([
         ("system", system),
         ("user",   "Conversation summary (for pronouns, references): {summary}"),
@@ -104,7 +156,8 @@ def claude_candidates():
     return ["claude-3-5-sonnet-20241022", "claude-3-5-sonnet", "claude-3-haiku-20240307"]
 
 def ask_claude(system: str, question: str, context: str, summary: str) -> tuple[str, float]:
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    # Use cached Claude client instead of creating new one
+    client = get_claude_client()
     text = (f"{system}\n\n"
             f"Conversation summary (for pronouns, references): {summary}\n\n"
             f"Question: {question}\n\nContext:\n{context}")
@@ -185,20 +238,30 @@ def main():
         if session_id:
             save_turn(session_id, "user", q_raw)
 
-        # ---- follow-up smarts ----
-        # ---- follow-up smarts ----
-        summary = summarize_recent(history) if history else ""
-
-        # get the last assistant message (if any)
-        last_assistant = ""
-        for role, text in reversed(history[-6:]):
-            if role == "assistant":
-                last_assistant = text
-                break
-
-        # include the last assistant answer as context for rewriting
-        q_input_for_rewriter = f"{q_raw}\n(Reference: last assistant answer: {last_assistant})" if last_assistant else q_raw
-        q_standalone = rewrite_question(q_input_for_rewriter, summary)
+        # ---- follow-up smarts (Optimization 4: Skip for standalone questions) ----
+        # Check if question is standalone - if so, skip expensive follow-up processing
+        if history and not is_standalone_question(q_raw):
+            # This is likely a follow-up question, so we need context
+            summary = summarize_recent(history)
+            # get the last assistant message (if any)
+            last_assistant = ""
+            for role, text in reversed(history[-6:]):
+                if role == "assistant":
+                    last_assistant = text
+                    break
+            # include the last assistant answer as context for rewriting
+            q_input_for_rewriter = f"{q_raw}\n(Reference: last assistant answer: {last_assistant})" if last_assistant else q_raw
+            q_standalone = rewrite_question(q_input_for_rewriter, summary)
+        else:
+            # Standalone question - use it directly, no expensive API calls needed
+            summary = ""
+            q_standalone = q_raw
+            last_assistant = ""
+            # Still try to get last assistant for potential retrieval boost
+            for role, text in reversed(history[-6:]):
+                if role == "assistant":
+                    last_assistant = text
+                    break
 
 
         # ---- retrieval using the standalone form ----
