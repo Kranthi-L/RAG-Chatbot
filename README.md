@@ -118,6 +118,16 @@ source .venv/bin/activate # (use .venv\Scripts\activate on Windows)
 
 pip install -r requirements.txt
 
+# Install FFmpeg (required for speech-to-text)
+# macOS:
+brew install ffmpeg
+
+# Linux (Ubuntu/Debian):
+# sudo apt-get install ffmpeg
+
+# Windows:
+# Download from https://ffmpeg.org/download.html and add to PATH
+
 # How to Use the Project
 
 🧱 Step 1 — Ingest PDFs
@@ -238,3 +248,20 @@ Goal: Turn the chatbot into a personalized learning companion.
 🧩 Dynamically adjust explanation depth and difficulty.
 
 📚 Integrate analytics dashboard for instructors.
+
+---
+
+## 🔧 Quick Reference: Models and Technologies
+
+| Component | Technology/Model | Details |
+|-----------|------------------|---------|
+| **Embeddings** | sentence-transformers/all-MiniLM-L6-v2 | 384-dim, normalized, HuggingFace |
+| **Vector DB** | ChromaDB | Persistent, cosine similarity |
+| **Text Splitter** | RecursiveCharacterTextSplitter | 1200 chars, 200 overlap |
+| **LLM 1** | GPT-4o-mini | OpenAI, temperature=0.0, max_tokens=700 |
+| **LLM 2** | Claude-3.5-Sonnet-20241022 | Anthropic, temperature=0.0 |
+| **STT** | OpenAI Whisper (base) | 16kHz, file-based transcription |
+| **TTS** | macOS `say` / pyttsx3 | 140 words/min default |
+| **Evaluation** | ROUGE-L, BLEU-4, BERTScore | rouge-score, sacrebleu, bert-score |
+| **Framework** | Streamlit, LangChain | Web UI, RAG pipeline |
+| **PDF Processing** | PyPDFLoader, pypdf | Text extraction |
