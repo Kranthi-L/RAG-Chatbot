@@ -65,7 +65,15 @@ Your implementation follows the same methodology and achieves results within the
 ✅ Compared GPT vs Claude quantitatively using ROUGE, BLEU, and BERTScore.  
 ✅ Implemented persistent conversation sessions and follow-up question understanding.  
 ✅ Created both a Command-Line Interface (CLI) and a Streamlit web app.  
-✅ Achieved metric results consistent with those reported in the paper.
+✅ Achieved metric results consistent with those reported in the paper.  
+✅ **Added comprehensive accessibility features:**
+  - Speech-to-Text (STT) using OpenAI Whisper with automatic silence detection
+  - Text-to-Speech (TTS) using Edge TTS with configurable speech rate (100-300 WPM, default 200)
+  - Continuous listening mode with state management for seamless voice interaction
+  - Visual accessibility: Light/Dark/High Contrast themes and adjustable font sizes
+  - Modality selector: Switch between Speech and Text input modes
+  - Auto-speak in Speech mode: Responses automatically read aloud after voice queries
+  - LaTeX formula cleaning for TTS: Formulas converted to readable text for natural speech
 
 **Evaluation Summary (Networking Dataset):**
 
@@ -222,20 +230,27 @@ Evaluation metrics Automatic scoring (ROUGE, BLEU, BERTScore). ✅
 Session persistence Save and resume chats by session ID. ✅
 Follow-up understanding Summarize and rewrite follow-up questions. ✅
 Streamlit web UI Interactive, user-friendly interface. ✅
-Accessibility (Speech I/O, font control) Voice input/output for differently-abled users. 🚧 Phase 2
+Speech-to-Text (STT) Voice input using OpenAI Whisper with silence detection. ✅
+Text-to-Speech (TTS) Edge TTS with auto-speak in Speech mode, manual playback via speaker icons. ✅
+Continuous Listening Automatic speech input with state management (idle/listening/processing/speaking). ✅
+Visual Accessibility Light/Dark/High Contrast themes and adjustable font sizes. ✅
+Modality Selection Switch between Speech and Text input modes with automatic TTS in Speech mode. ✅
 Adaptive learning Personalized tutoring and progress tracking. 🚧 Phase 3
 🔭 Next Phases
-Phase 2 — Accessibility & Multimodality
+Phase 2 — Enhanced Accessibility & Multimodality
 
-Goal: Make the chatbot inclusive and easy to use for differently-abled users.
+Goal: Further improve accessibility and add advanced multimodal features.
 
-🗣️ Speech-to-Text (STT): Convert spoken questions to text (Whisper).
+✅ **Completed in Phase 1:**
+- 🗣️ Speech-to-Text (STT): Convert spoken questions to text (Whisper with silence detection)
+- 🔊 Text-to-Speech (TTS): Read out chatbot responses (Edge TTS with configurable rate)
+- 🎨 Visual Accessibility: Font resizing, color contrast modes, and high-contrast UI
+- 🔄 Continuous Listening: Automatic speech input with state management
 
-🔊 Text-to-Speech (TTS): Read out chatbot responses (pyttsx3 or macOS say).
-
-🎨 Visual Accessibility: Font resizing, color contrast modes, and high-contrast UI.
-
-♿ Keyboard-only navigation and ARIA labels for accessibility compliance.
+🚧 **Remaining for Phase 2:**
+- ♿ Keyboard-only navigation and ARIA labels for accessibility compliance
+- 🌐 Multi-language support for STT/TTS
+- 📱 Mobile-responsive design improvements
 
 Phase 3 — Adaptive Learning & Analytics
 
@@ -260,8 +275,8 @@ Goal: Turn the chatbot into a personalized learning companion.
 | **Text Splitter** | RecursiveCharacterTextSplitter | 1200 chars, 200 overlap |
 | **LLM 1** | GPT-4o-mini | OpenAI, temperature=0.0, max_tokens=700 |
 | **LLM 2** | Claude-3.5-Sonnet-20241022 | Anthropic, temperature=0.0 |
-| **STT** | OpenAI Whisper (base) | 16kHz, file-based transcription |
-| **TTS** | macOS `say` / pyttsx3 | 140 words/min default |
+| **STT** | OpenAI Whisper (base) | 16kHz, silence detection, 60s max duration |
+| **TTS** | Edge TTS (primary) / macOS `say` (fallback) | 200 words/min default, 100-300 WPM range |
 | **Evaluation** | ROUGE-L, BLEU-4, BERTScore | rouge-score, sacrebleu, bert-score |
 | **Framework** | Streamlit, LangChain | Web UI, RAG pipeline |
 | **PDF Processing** | PyPDFLoader, pypdf | Text extraction |

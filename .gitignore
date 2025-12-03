@@ -48,6 +48,9 @@ eval/*.json
 *.swp
 *.swo
 
+# Verification files
+verification*.md
+
 # IDE settings
 .vscode/
 .idea/
