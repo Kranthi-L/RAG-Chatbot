@@ -31,9 +31,10 @@ data/**/*.PDF
 data/**/*.txt
 
 # Evaluation outputs
-eval/*_filled.csv
-eval/*_metrics.csv
+eval/*.csv
+eval/*.png
 eval/*.json
+
 
 # Streamlit cache and logs
 .streamlit/
