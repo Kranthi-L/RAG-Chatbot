@@ -4,7 +4,6 @@ from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
-# Vector store
 from langchain_community.vectorstores import Chroma
 
 # Prompting
@@ -12,6 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 # LLMs
 from langchain_openai import ChatOpenAI
+from langchain_huggingface import HuggingFaceEmbeddings
 import anthropic
 from anthropic import NotFoundError
 
@@ -92,7 +92,11 @@ def build_context(docs) -> str:
     return "\n\n".join(blocks)
 
 def get_vs():
-    return Chroma(persist_directory=DB_DIR)
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        encode_kwargs={"normalize_embeddings": True},
+    )
+    return Chroma(persist_directory=DB_DIR, embedding_function=embeddings)
 
 def retrieve(vs, q: str, k: int, course: Optional[str]):
     filt = None if not course or course == "all" else {"course": {"$eq": course}}

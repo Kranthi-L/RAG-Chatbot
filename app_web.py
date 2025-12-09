@@ -5,12 +5,16 @@ from dotenv import load_dotenv
 from typing import List, Tuple
 
 # RAG bits
-from langchain_community.vectorstores import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 
-# LLMs
-from langchain_openai import ChatOpenAI
-import anthropic
+from rag_core import (
+    answer_with_model,
+    build_context,
+    get_gpt_llm,
+    get_vector_store,
+    retrieve_docs,
+)
+from course_utils import discover_courses, get_course_display_name
 
 # session persistence (same as CLI)
 # Note: Using client-side session state only (Option 3) - no file persistence
@@ -36,59 +40,16 @@ from continuous_listening import (
 
 load_dotenv()
 
-DB_DIR   = "chroma_db"
-SYSTEM   = open("prompts/qa_system.md").read()
-COURSES  = ["all", "networking", "architecture"]
-
-# ---------------------------
-# LLM client caching (Optimization 1: Reuse instances instead of creating new ones)
-# ---------------------------
-# Cache GPT LLM instances by temperature to avoid recreating connections
-_gpt_llm_cache: dict[float, ChatOpenAI] = {}
-_claude_client: anthropic.Anthropic | None = None
-
-def get_gpt_llm(temperature: float = 0) -> ChatOpenAI:
-    """Get or create a cached GPT LLM instance for the given temperature."""
-    if temperature not in _gpt_llm_cache:
-        _gpt_llm_cache[temperature] = ChatOpenAI(model="gpt-4o-mini", temperature=temperature)
-    return _gpt_llm_cache[temperature]
-
-def get_claude_client() -> anthropic.Anthropic:
-    """Get or create a cached Claude client instance."""
-    global _claude_client
-    if _claude_client is None:
-        _claude_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    return _claude_client
+def get_course_options() -> List[str]:
+    """
+    Discover available courses from data/ folders. Always include 'all' first.
+    """
+    discovered = discover_courses()
+    return ["all"] + discovered if discovered else ["all"]
 
 # ---------------------------
 # Helpers from CLI version
 # ---------------------------
-def build_context(docs) -> str:
-    """
-    Optimization 5: Build context with length limits to prevent token limit issues.
-    Limits total context to ~8000 characters (roughly 2000 tokens).
-    """
-    blocks = []
-    total_chars = 0
-    max_context_chars = 8000  # Conservative limit to stay well under token limits
-    
-    for i, d in enumerate(docs, 1):
-        src  = d.metadata.get("filename") or os.path.basename(d.metadata.get("source", ""))
-        page = d.metadata.get("page", "?")
-        course = d.metadata.get("course") or d.metadata.get("book", "unknown")
-        block = f"[{i}] {d.page_content}\n(Source: {src}, p.{page}, course:{course})"
-        
-        # Check if adding this block would exceed limit
-        block_size = len(block) + 2  # +2 for "\n\n" separator
-        if total_chars + block_size > max_context_chars and blocks:
-            # Stop adding chunks if we'd exceed the limit
-            break
-        
-        blocks.append(block)
-        total_chars += block_size
-    
-    return "\n\n".join(blocks)
-
 def _cheap_llm(temp=0.0):
     # Now uses cached instance instead of creating new one each time
     return get_gpt_llm(temperature=temp)
@@ -146,47 +107,6 @@ def rewrite_question(user_q: str, summary: str) -> str:
     except Exception:
         return user_q
 
-def ask_gpt(system: str, question: str, context: str, summary: str, temperature: float) -> Tuple[str, float]:
-    # Use cached LLM instance instead of creating new one
-    llm = get_gpt_llm(temperature=temperature)
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system),
-        ("user",   "Conversation summary (for pronouns, references): {summary}"),
-        ("user",   "Question: {q}\n\nContext:\n{ctx}")
-    ])
-    msgs = prompt.format_messages(summary=summary, q=question, ctx=context)
-    t0 = time.time()
-    out = llm.invoke(msgs).content
-    ms = (time.time() - t0) * 1000
-    return out, ms
-
-def claude_candidates():
-    model = os.getenv("CLAUDE_MODEL")
-    return [model] if model else ["claude-3-5-sonnet-20241022", "claude-3-5-sonnet", "claude-3-haiku-20240307"]
-
-def ask_claude(system: str, question: str, context: str, summary: str, temperature: float) -> Tuple[str, float]:
-    # Use cached Claude client instead of creating new one
-    client = get_claude_client()
-    text = (f"{system}\n\n"
-            f"Conversation summary (for pronouns, references): {summary}\n\n"
-            f"Question: {question}\n\nContext:\n{context}")
-    last_err = None
-    for m in claude_candidates():
-        try:
-            t0 = time.time()
-            resp = client.messages.create(
-                model=m, max_tokens=700, temperature=temperature,
-                messages=[{"role": "user", "content": text}]
-            )
-            ms = (time.time() - t0) * 1000
-            parts = [blk.text for blk in resp.content if getattr(blk, "type", None) == "text"]
-            return ("\n".join(parts).strip(), ms)
-        except anthropic.NotFoundError as e:
-            last_err = e
-        except Exception as e:
-            raise
-    raise last_err or RuntimeError("No working Claude model ID found")
-
 # ---------------------------
 # Streamlit UI
 # ---------------------------
@@ -207,7 +127,14 @@ with st.sidebar:
     st.session_state.session_id = session_id
 
     backend = st.selectbox("Backend", ["gpt", "claude", "both"], index=0)
-    course  = st.selectbox("Course filter", COURSES, index=1)  # default networking
+    course_options = get_course_options()
+    default_course = "networking" if "networking" in course_options else "all"
+    course  = st.selectbox(
+        "Course filter",
+        course_options,
+        index=course_options.index(default_course),
+        format_func=get_course_display_name
+    )
     topk    = st.slider("Top-K (retrieval)", min_value=2, max_value=12, value=6, step=1)
     temperature = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.0, step=0.1,
                             help="Higher = more creative; lower = more factual and concise.")
@@ -1448,7 +1375,7 @@ st.caption(" Chroma DB + session memory + follow-up rewrite")
 
 # Vector store (cache in session)
 if "vs" not in st.session_state:
-    st.session_state.vs = Chroma(persist_directory=DB_DIR)
+    st.session_state.vs = get_vector_store()
 
 # Initialize history in session state (client-side only)
 if "history" not in st.session_state or st.session_state.get("loaded_for") != session_id:
@@ -1456,7 +1383,6 @@ if "history" not in st.session_state or st.session_state.get("loaded_for") != se
     st.session_state.loaded_for = session_id
 
 history = st.session_state.history
-vs      = st.session_state.vs
 
 # Input (check for new question first)
 # Always show chat input, but prioritize transcribed text if available
@@ -1565,19 +1491,12 @@ if q_raw:
                 break
 
     # retrieval
-    filt = None if course == "all" else {"course": {"$eq": course}}
-    try:
-        docs = vs.similarity_search(q_standalone, k=topk) if filt is None else vs.similarity_search(q_standalone, k=topk, filter=filt)
-    except TypeError:
-        docs = vs.similarity_search(q_standalone, k=topk)
-
-    # fallback if empty
-    if not docs and last_assistant:
-        boosted = f"{q_standalone}\nDetails mentioned previously: {last_assistant}"
-        try:
-            docs = vs.similarity_search(boosted, k=topk) if filt is None else vs.similarity_search(boosted, k=topk, filter=filt)
-        except TypeError:
-            docs = vs.similarity_search(boosted, k=topk)
+    docs = retrieve_docs(
+        query=q_standalone,
+        course=None if course == "all" else course,
+        top_k=topk,
+        last_assistant=last_assistant
+    )
 
     if not docs:
         answer = "[No relevant chunks found. Try rephrasing or broaden your query.]"
@@ -1640,10 +1559,10 @@ if q_raw:
     lat_gpt = lat_claude = None
 
     if backend in {"gpt","both"}:
-        answer_gpt, lat_gpt = ask_gpt(SYSTEM, q_standalone, ctx, summary, temperature)
+        answer_gpt, lat_gpt = answer_with_model("gpt", q_standalone, ctx, summary, temperature)
 
     if backend in {"claude","both"}:
-        answer_claude, lat_claude = ask_claude(SYSTEM, q_standalone, ctx, summary, temperature)
+        answer_claude, lat_claude = answer_with_model("claude", q_standalone, ctx, summary, temperature)
 
     # Clear placeholder and show response(s)
     response_placeholder.empty()

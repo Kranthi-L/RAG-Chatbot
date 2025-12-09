@@ -1,5 +1,0 @@
-course,question,should_contain
-networking,What does the application layer do?,application
-networking,What is TCP congestion control?,congestion
-architecture,Explain pipeline hazards.,hazard
-architecture,What is cache coherence?,coherence

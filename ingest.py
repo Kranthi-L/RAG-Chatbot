@@ -2,26 +2,37 @@
 import os
 import glob
 import json
+import shutil
 from typing import List, Optional
 
 from dotenv import load_dotenv
 from pypdf import PdfReader
 
 # LangChain (new-style imports)
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, UnstructuredPowerPointLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
+
+def sanitize_text(s: str) -> str:
+    """Return a UTF-8 safe version of s, replacing invalid surrogates/etc."""
+    if not isinstance(s, str):
+        s = str(s)
+    return s.encode("utf-8", "replace").decode("utf-8")
 
 load_dotenv()
 
 DATA_DIR = "data"        # expects subfolders per course, e.g., data/networking/, data/architecture/
 DB_DIR = "chroma_db"     # Chroma index folder (created automatically)
 RANGES_FN = "ranges.json"  # optional, can be absent
+COURSE_FILTER = os.getenv("COURSE_FILTER")
 
-# ---- Embeddings (local, free) -----------------------------------------------
-# all-MiniLM-L6-v2 is small & good; normalization helps cosine similarity
+# Always rebuild a fresh DB to avoid duplicate entries
+if os.path.exists(DB_DIR):
+    shutil.rmtree(DB_DIR)
+
+# ---- Embeddings -------------------------------------------------------------
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2",
     encode_kwargs={"normalize_embeddings": True}
@@ -66,11 +77,21 @@ def load_pdf_subset(path: str, page_idxs: Optional[List[int]]) -> List[Document]
             docs.append(Document(page_content=text, metadata={"source": path, "page": i + 1}))
     return docs
 
-# ---- Collect PDFs ------------------------------------------------------------
-# Find all PDFs under data/* (any depth) so you can have many PDFs per course
-paths = sorted(glob.glob(f"{DATA_DIR}/**/*.pdf", recursive=True))
-if not paths:
-    raise SystemExit("No PDFs found under ./data (tip: put files under data/<course>/YourFile.pdf).")
+# ---- Collect PDFs and PPTX ---------------------------------------------------
+pdf_paths = sorted(glob.glob(f"{DATA_DIR}/**/*.pdf", recursive=True))
+pptx_paths = sorted(glob.glob(f"{DATA_DIR}/**/*.pptx", recursive=True))
+files = [(p, "pdf") for p in pdf_paths] + [(p, "pptx") for p in pptx_paths]
+files = sorted(files, key=lambda x: x[0])
+
+if COURSE_FILTER:
+    cf_lower = COURSE_FILTER.lower()
+    files = [f for f in files if os.path.basename(os.path.dirname(f[0])).lower() == cf_lower]
+    print(f"Course filter: {COURSE_FILTER}")
+else:
+    print("Course filter: <none>")
+
+if not files:
+    raise SystemExit("No PDFs/PPTX found under ./data (tip: put files under data/<course>/YourFile.pdf).")
 
 # Optional page ranges per file (key = basename, e.g., 'book1.pdf')
 ranges = {}
@@ -80,36 +101,51 @@ if os.path.exists(RANGES_FN):
 
 # ---- Load raw page-documents with metadata ----------------------------------
 raw_docs: List[Document] = []
-print(f"Discovered {len(paths)} PDF file(s).")
-for p in paths:
-    base = os.path.basename(p)
-    parent = os.path.basename(os.path.dirname(p)).lower()  # course label from folder name
+print(f"Discovered {len(files)} file(s) (PDF + PPTX).")
+for path, kind in files:
+    base = os.path.basename(path)
+    parent = os.path.basename(os.path.dirname(path)).lower()  # course label from folder name
     course = parent if parent else "unknown"
 
-    try:
-        n_pages = len(PdfReader(p).pages)
-    except Exception:
-        n_pages = None
+    if kind == "pdf":
+        try:
+            n_pages = len(PdfReader(path).pages)
+        except Exception:
+            n_pages = None
 
-    # If ranges.json exists and has an entry for this basename, use it; else full file
-    page_idxs = parse_ranges(ranges.get(base, ""), n_pages) if n_pages else None
+        page_idxs = parse_ranges(ranges.get(base, ""), n_pages) if n_pages else None
 
-    print(f"- Ingesting: {p}")
-    if page_idxs:
-        preview = [i + 1 for i in page_idxs[:8]]
-        print(f"  Using page ranges (1-based): {preview}{' ...' if len(page_idxs) > 8 else ''} (total {len(page_idxs)})")
-    else:
-        print("  Using: ALL pages")
+        print(f"- Ingesting PDF: {path}")
+        if page_idxs:
+            preview = [i + 1 for i in page_idxs[:8]]
+            print(f"  Using page ranges (1-based): {preview}{' ...' if len(page_idxs) > 8 else ''} (total {len(page_idxs)})")
+        else:
+            print("  Using: ALL pages")
 
-    docs = load_pdf_subset(p, page_idxs)
+        docs = load_pdf_subset(path, page_idxs)
 
-    # tag each page with metadata for filtering/citation later
-    for d in docs:
-        d.metadata["course"] = course
-        d.metadata["filename"] = base
-    raw_docs.extend(docs)
+        for d in docs:
+            d.metadata["course"] = course
+            d.metadata["filename"] = base
+        raw_docs.extend(docs)
 
-print(f"Loaded {len(raw_docs)} page-doc(s) from {len(paths)} file(s).")
+    elif kind == "pptx":
+        print(f"- Ingesting PPTX: {path}")
+        try:
+            docs = UnstructuredPowerPointLoader(path).load()
+        except Exception as e:
+            print(f"  Skipped (failed to load): {e}")
+            continue
+
+        for i, d in enumerate(docs, start=1):
+            if not hasattr(d, "metadata") or d.metadata is None:
+                d.metadata = {}
+            d.metadata.setdefault("course", course)
+            d.metadata.setdefault("filename", base)
+            d.metadata.setdefault("page", i)
+        raw_docs.extend(docs)
+
+print(f"Loaded {len(raw_docs)} page-doc(s) from {len(files)} file(s).")
 
 # ---- Chunking ----------------------------------------------------------------
 splitter = RecursiveCharacterTextSplitter(
@@ -120,12 +156,89 @@ splitter = RecursiveCharacterTextSplitter(
 chunks = splitter.split_documents(raw_docs)
 print(f"Split into {len(chunks)} chunk(s).")
 
+# ---- Debug: inspect raw page_content types per course -----------------------
+course_type_counts = {}
+non_str_examples = []
+for i, doc in enumerate(chunks):
+    pc = doc.page_content
+    course = doc.metadata.get("course", "unknown")
+    t = type(pc).__name__
+
+    c_counts = course_type_counts.setdefault(course, {})
+    c_counts[t] = c_counts.get(t, 0) + 1
+
+    if not isinstance(pc, str) and len(non_str_examples) < 5:
+        non_str_examples.append({
+            "idx": i,
+            "type": t,
+            "course": course,
+            "filename": doc.metadata.get("filename"),
+            "sample": repr(pc)[:200],
+        })
+
+print("DEBUG: page_content type counts per course:", course_type_counts)
+if non_str_examples:
+    print("DEBUG: sample non-string page_content chunks:")
+    for ex in non_str_examples:
+        print("  -", ex)
+
+# ---- Clean chunk contents before embedding ---------------------------------
+clean_chunks: List[Document] = []
+dropped = 0
+
+for doc in chunks:
+    pc = doc.page_content
+
+    if pc is None:
+        dropped += 1
+        continue
+
+    if not isinstance(pc, str):
+        try:
+            pc = str(pc)
+        except Exception:
+            dropped += 1
+            continue
+
+    pc = pc.strip()
+    if not pc:
+        dropped += 1
+        continue
+
+    doc.page_content = pc
+    clean_chunks.append(doc)
+
+print(f"Cleaned chunks: {len(chunks)} -> {len(clean_chunks)} (dropped {dropped})")
+
+# Final safety check: ensure only strings remain
+for i, d in enumerate(clean_chunks):
+    if not isinstance(d.page_content, str):
+        raise TypeError(
+            f"Non-string after cleaning at index {i}: {type(d.page_content)} -> {d.page_content!r}"
+        )
+
+# ---- Sanitize text to ensure UTF-8 safety -----------------------------------
+sanitized_docs = 0
+for doc in clean_chunks:
+    original_pc = doc.page_content
+    safe_pc = sanitize_text(original_pc)
+    if safe_pc != original_pc:
+        sanitized_docs += 1
+    doc.page_content = safe_pc
+
+    if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
+        for k, v in list(doc.metadata.items()):
+            if isinstance(v, str):
+                doc.metadata[k] = sanitize_text(v)
+
+print(f"Sanitized UTF-8 for {sanitized_docs} document(s) before indexing.")
+
 # ---- Build / persist Chroma index -------------------------------------------
 # Pass an Embeddings object (not a raw function) for compatibility
 vs = Chroma.from_documents(
-    documents=chunks,
+    documents=clean_chunks,
     embedding=embeddings,
     persist_directory=DB_DIR,
 )
 vs.persist()
-print(f"Indexed {len(chunks)} chunks → {DB_DIR}")
+print(f"Indexed {len(clean_chunks)} chunks → {DB_DIR}")

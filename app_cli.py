@@ -4,40 +4,24 @@ from dotenv import load_dotenv
 from rich import print as rprint
 
 # Vector store
-from langchain_community.vectorstores import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 
-# LLMs
-from langchain_openai import ChatOpenAI
-import anthropic
+from rag_core import (
+    answer_with_model,
+    ask_claude,
+    ask_gpt,
+    build_context,
+    get_gpt_llm,
+    get_vector_store,
+    retrieve_docs,
+)
 
 # Session memory
 from memory import load_history, save_turn, new_session, reset_session
 
 load_dotenv()
 
-DB_DIR = "chroma_db"
 SYSTEM = open("prompts/qa_system.md").read()
-
-# ---------------------------
-# LLM client caching (Optimization 1: Reuse instances instead of creating new ones)
-# ---------------------------
-# Cache GPT LLM instances by temperature to avoid recreating connections
-_gpt_llm_cache: dict[float, ChatOpenAI] = {}
-_claude_client: anthropic.Anthropic | None = None
-
-def get_gpt_llm(temperature: float = 0) -> ChatOpenAI:
-    """Get or create a cached GPT LLM instance for the given temperature."""
-    if temperature not in _gpt_llm_cache:
-        _gpt_llm_cache[temperature] = ChatOpenAI(model="gpt-4o-mini", temperature=temperature)
-    return _gpt_llm_cache[temperature]
-
-def get_claude_client() -> anthropic.Anthropic:
-    """Get or create a cached Claude client instance."""
-    global _claude_client
-    if _claude_client is None:
-        _claude_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    return _claude_client
 
 # ---------------------------
 # LLM helpers (cheap & tight)
@@ -109,75 +93,6 @@ def rewrite_question(user_q: str, summary: str) -> str:
 # ---------------------------
 # Retrieval & generation
 # ---------------------------
-def build_context(docs) -> str:
-    """
-    Optimization 5: Build context with length limits to prevent token limit issues.
-    Limits total context to ~8000 characters (roughly 2000 tokens).
-    """
-    blocks = []
-    total_chars = 0
-    max_context_chars = 8000  # Conservative limit to stay well under token limits
-    
-    for i, d in enumerate(docs, 1):
-        src  = d.metadata.get("filename") or os.path.basename(d.metadata.get("source", ""))
-        page = d.metadata.get("page", "?")
-        course = d.metadata.get("course") or d.metadata.get("book", "unknown")
-        block = f"[{i}] {d.page_content}\n(Source: {src}, p.{page}, course:{course})"
-        
-        # Check if adding this block would exceed limit
-        block_size = len(block) + 2  # +2 for "\n\n" separator
-        if total_chars + block_size > max_context_chars and blocks:
-            # Stop adding chunks if we'd exceed the limit
-            break
-        
-        blocks.append(block)
-        total_chars += block_size
-    
-    return "\n\n".join(blocks)
-
-def ask_gpt(system: str, question: str, context: str, summary: str) -> tuple[str, float]:
-    # Use cached LLM instance instead of creating new one
-    llm = get_gpt_llm(temperature=0)
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system),
-        ("user",   "Conversation summary (for pronouns, references): {summary}"),
-        ("user",   "Question: {q}\n\nContext:\n{ctx}")
-    ])
-    msgs = prompt.format_messages(summary=summary, q=question, ctx=context)
-    t0 = time.time()
-    out = llm.invoke(msgs).content
-    ms = (time.time() - t0) * 1000
-    return out, ms
-
-def claude_candidates():
-    model = os.getenv("CLAUDE_MODEL")
-    if model:
-        return [model]
-    return ["claude-3-5-sonnet-20241022", "claude-3-5-sonnet", "claude-3-haiku-20240307"]
-
-def ask_claude(system: str, question: str, context: str, summary: str) -> tuple[str, float]:
-    # Use cached Claude client instead of creating new one
-    client = get_claude_client()
-    text = (f"{system}\n\n"
-            f"Conversation summary (for pronouns, references): {summary}\n\n"
-            f"Question: {question}\n\nContext:\n{context}")
-    last_err = None
-    for m in claude_candidates():
-        try:
-            t0 = time.time()
-            resp = client.messages.create(
-                model=m, max_tokens=700, temperature=0,
-                messages=[{"role": "user", "content": text}]
-            )
-            ms = (time.time() - t0) * 1000
-            parts = [blk.text for blk in resp.content if getattr(blk, "type", None) == "text"]
-            return ("\n".join(parts).strip(), ms)
-        except anthropic.NotFoundError as e:
-            last_err = e
-        except Exception as e:
-            raise
-    raise last_err or RuntimeError("No working Claude model ID found")
-
 # ---------------------------
 # CLI plumbing
 # ---------------------------
@@ -197,7 +112,7 @@ def parse_args():
 
 def main():
     # vector store
-    vs = Chroma(persist_directory=DB_DIR)
+    vs = get_vector_store()
 
     args = parse_args()
     backend = args.backend
@@ -222,8 +137,6 @@ def main():
     else:
         history = []
 
-    # Retrieval filter
-    filt = None if target == "all" else {"course": {"$eq": target}}
     rprint(f"[bold]RAG Chatbot[/bold] — backend: {backend.upper()}  |  course: {target}"
            + (f"  |  session: {session_id}" if session_id else ""))
 
@@ -265,24 +178,12 @@ def main():
 
 
         # ---- retrieval using the standalone form ----
-        try:
-            if filt is None:
-                docs = vs.similarity_search(q_standalone, k=topk)
-            else:
-                docs = vs.similarity_search(q_standalone, k=topk, filter=filt)
-        except TypeError:
-            docs = vs.similarity_search(q_standalone, k=topk)
-
-        # If retrieval returned nothing, retry with assistant answer as booster
-        if not docs and last_assistant:
-            boosted_query = f"{q_standalone}\nDetails mentioned previously: {last_assistant}"
-            try:
-                if filt is None:
-                    docs = vs.similarity_search(boosted_query, k=topk)
-                else:
-                    docs = vs.similarity_search(boosted_query, k=topk, filter=filt)
-            except TypeError:
-                docs = vs.similarity_search(boosted_query, k=topk)
+        docs = retrieve_docs(
+            query=q_standalone,
+            course=target if target != "all" else None,
+            top_k=topk,
+            last_assistant=last_assistant
+        )
 
 
         if not docs:
@@ -299,12 +200,12 @@ def main():
         # ---- generation with summary + context ----
         gpt_ans = claude_ans = None
         if backend in {"gpt", "both"}:
-            ans, ms = ask_gpt(SYSTEM, q_standalone, ctx, summary)
+            ans, ms = answer_with_model("gpt", q_standalone, ctx, summary, temperature=0.0)
             gpt_ans = ans
             rprint(f"\n[bold cyan]GPT[/bold cyan]  ({ms:.0f} ms):\n{ans}")
 
         if backend in {"claude", "both"}:
-            ans, ms = ask_claude(SYSTEM, q_standalone, ctx, summary)
+            ans, ms = answer_with_model("claude", q_standalone, ctx, summary, temperature=0.0)
             claude_ans = ans
             rprint(f"\n[bold magenta]Claude[/bold magenta]  ({ms:.0f} ms):\n{ans}")
 
