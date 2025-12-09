@@ -34,6 +34,7 @@ data/**/*.txt
 eval/*.csv
 eval/*.png
 eval/*.json
+*.csv
 
 
 # Streamlit cache and logs
