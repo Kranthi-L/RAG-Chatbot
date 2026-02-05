@@ -13,10 +13,19 @@ def main():
     # Normalize
     df["course"] = df["course"].astype(str).str.strip().str.lower()
     df["model"] = df["model"].astype(str).str.strip().str.lower()
+    if "retriever_type" not in df.columns:
+        df["retriever_type"] = "dense"
+    else:
+        df["retriever_type"] = df["retriever_type"].astype(str).str.strip().str.lower()
 
     # Just to be safe
     df["avg_judge_score"] = pd.to_numeric(df["avg_judge_score"], errors="coerce")
     df = df.dropna(subset=["avg_judge_score"])
+
+    # Phase 3: focus on hybrid only (ignore dense/others)
+    df = df[df["retriever_type"] == "hybrid"]
+    if df.empty:
+        raise ValueError("No rows with retriever_type == 'hybrid' found in summary_metrics.csv")
 
     # For each (course, model), get row with max avg_judge_score
     idx = df.groupby(["course", "model"])["avg_judge_score"].idxmax()

@@ -21,6 +21,64 @@ from typing import Literal, Optional
 LearnerLevel = Literal["beginner", "intermediate", "advanced"]
 
 
+def normalize_learner_level(level: Optional[str]) -> Optional[str]:
+    """Normalize learner level to a known string or None."""
+    if level is None:
+        return None
+    lvl = str(level).strip().lower()
+    if lvl in {"beginner", "intermediate", "advanced"}:
+        return lvl
+    return None
+
+
+def get_retrieval_config_for_level(base_top_k: int, learner_level: Optional[str]) -> dict:
+    """
+    Return retrieval configuration for a learner level.
+    - effective_top_k adjusts breadth of context.
+    - use_level_reranker signals whether to rerank for level.
+    """
+    lvl = normalize_learner_level(learner_level)
+    if lvl is None:
+        return {"effective_top_k": base_top_k, "use_level_reranker": False}
+    if lvl == "beginner":
+        return {"effective_top_k": 12, "use_level_reranker": True}
+    if lvl == "intermediate":
+        return {"effective_top_k": base_top_k, "use_level_reranker": True}
+    if lvl == "advanced":
+        return {"effective_top_k": 4, "use_level_reranker": True}
+    return {"effective_top_k": base_top_k, "use_level_reranker": False}
+
+
+def get_generation_style_instructions(learner_level: Optional[str]) -> str:
+    """
+    Style guidance to append to system prompt based on learner level.
+    """
+    lvl = normalize_learner_level(learner_level)
+    if lvl is None:
+        return ""
+    if lvl == "beginner":
+        return (
+            "You are explaining to a BEGINNER.\n"
+            "Use simple, everyday language.\n"
+            "Explain every technical term or complex formula in simpler steps.\n"
+            "Break your explanation into steps and make it easily understandable.\n"
+            "Include one simple analogy to illustrate the concept."
+        )
+    if lvl == "intermediate":
+        return (
+            "You are explaining to an INTERMEDIATE learner.\n"
+            "Assume they know basic terminology.\n"
+            "Provide a mix of intuition and accurate technical details."
+        )
+    if lvl == "advanced":
+        return (
+            "You are explaining to an ADVANCED learner.\n"
+            "Be concise, precise, and technical.\n"
+            "Use domain-specific terminology freely."
+        )
+    return ""
+
+
 def render_profile_instructions(level: Optional[LearnerLevel]) -> str:
     """
     Return natural-language instructions describing how the model

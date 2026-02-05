@@ -13,6 +13,7 @@ from rag_core import (
     get_gpt_llm,
     get_vector_store,
     retrieve_docs,
+    RetrieverType,
 )
 from course_utils import discover_courses, get_course_display_name
 
@@ -138,6 +139,19 @@ with st.sidebar:
     topk    = st.slider("Top-K (retrieval)", min_value=2, max_value=12, value=6, step=1)
     temperature = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.0, step=0.1,
                             help="Higher = more creative; lower = more factual and concise.")
+    retriever_label = st.selectbox(
+        "Retriever",
+        options=[r.value for r in RetrieverType],
+        format_func=lambda v: v.replace("_", " ").title(),
+        index=0,
+        help="Dense (default), BM25, Hybrid, or Section-aware.",
+    )
+    learner_level_opt = st.selectbox(
+        "Learner level (optional)",
+        options=["none", "beginner", "intermediate", "advanced"],
+        index=0,
+        help="Level-aware reranking; choose 'none' to disable.",
+    )
     primary = st.radio("Primary answer to store (when Both)", ["gpt","claude"], index=0)
     
     st.divider()
@@ -1490,12 +1504,17 @@ if q_raw:
                 last_assistant = text
                 break
 
+    retriever_type = RetrieverType(retriever_label)
+    learner_level = None if learner_level_opt == "none" else learner_level_opt
+
     # retrieval
     docs = retrieve_docs(
         query=q_standalone,
         course=None if course == "all" else course,
         top_k=topk,
-        last_assistant=last_assistant
+        last_assistant=last_assistant,
+        retriever_type=retriever_type,
+        learner_level=learner_level,
     )
 
     if not docs:
@@ -1559,10 +1578,10 @@ if q_raw:
     lat_gpt = lat_claude = None
 
     if backend in {"gpt","both"}:
-        answer_gpt, lat_gpt = answer_with_model("gpt", q_standalone, ctx, summary, temperature)
+        answer_gpt, lat_gpt = answer_with_model("gpt", q_standalone, ctx, summary, temperature, learner_level=learner_level)
 
     if backend in {"claude","both"}:
-        answer_claude, lat_claude = answer_with_model("claude", q_standalone, ctx, summary, temperature)
+        answer_claude, lat_claude = answer_with_model("claude", q_standalone, ctx, summary, temperature, learner_level=learner_level)
 
     # Clear placeholder and show response(s)
     response_placeholder.empty()

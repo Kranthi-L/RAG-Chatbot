@@ -32,7 +32,7 @@ def parse_filename(path: Path) -> Tuple[str, float, int]:
     Parse course, temperature, top_k from judged_{course}_temp{TEMP}_topk{K}.csv
     TEMP uses 'p' instead of '.'.
     """
-    m = re.match(r"judged_(.+)_temp([^_]+)_topk(\d+)\.csv", path.name)
+    m = re.match(r"judged_(.+)_temp([^_]+)_topk(\d+)(?:_.*)?\.csv", path.name)
     if not m:
         raise ValueError(f"Filename does not match pattern: {path.name}")
     course = m.group(1)
@@ -114,6 +114,17 @@ def process_file(path: Path, model: SentenceTransformer, rows_out: List[Dict[str
         print(f"Skipping {path.name}: {e}", file=sys.stderr)
         return
 
+    stem = path.stem  # e.g., judged_networking_temp0p2_topk8_hybrid
+    retriever_type = "dense"
+    if "_hybrid" in stem:
+        retriever_type = "hybrid"
+    elif "_bm25" in stem:
+        retriever_type = "bm25"
+    elif "_section_aware" in stem:
+        retriever_type = "section_aware"
+    elif "_dense" in stem:
+        retriever_type = "dense"
+
     try:
         df = pd.read_csv(path, encoding="utf-8", encoding_errors="replace")
     except Exception as e:
@@ -159,6 +170,7 @@ def process_file(path: Path, model: SentenceTransformer, rows_out: List[Dict[str
                     "course": course,
                     "temperature": temp,
                     "top_k": top_k,
+                    "retriever_type": retriever_type,
                     "model": model_name,
                     "num_questions": num_questions,
                     "avg_answer_length": avg_answer_length,

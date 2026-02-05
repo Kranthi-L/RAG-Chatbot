@@ -36,7 +36,7 @@ for p in [SCRIPT_DIR, PARENT_DIR, ROOT_DIR]:
         sys.path.append(str(p))
 
 try:
-    from rag_core import retrieve_docs, build_context, ask_gpt, ask_claude
+    from rag_core import retrieve_docs, build_context, ask_gpt, ask_claude, RetrieverType
 except ImportError as e:
     raise ImportError(
         "Could not import rag_core. Make sure this script is located in "
@@ -51,6 +51,8 @@ except ImportError as e:
 ABLATION_Q_PATH = SCRIPT_DIR / "ablation_questions.csv"
 OUTPUT_PATH = SCRIPT_DIR / "ablation_answers.csv"
 
+# Use hybrid retriever for Phase 3 ablation
+RETRIEVER_TYPE = RetrieverType.HYBRID
 
 # ----------------------------------------------------------------------
 # Best configs per (course, model)
@@ -59,7 +61,7 @@ OUTPUT_PATH = SCRIPT_DIR / "ablation_answers.csv"
 
 # (course, model) -> (temperature, top_k)
 BEST_CONFIGS: Dict[Tuple[str, str], Tuple[float, int]] = {
-    ("architecture", "claude"): (1.0, 6),
+    ("architecture", "claude"): (1.0, 8),
     ("architecture", "gpt"): (0.5, 8),
     ("machine_learning", "claude"): (0.2, 8),
     ("machine_learning", "gpt"): (1.0, 8),
@@ -133,6 +135,7 @@ def main():
         "condition",
         "temperature",
         "top_k",
+        "retriever_type",
         "latency_ms",
         "response",
     ]
@@ -165,7 +168,14 @@ def main():
                 print(f"  -> Model={model.upper()}, temperature={temperature}, top_k={top_k}")
 
                 # Retrieve context ONCE per (question, course, model)
-                docs = retrieve_docs(query=question, course=course, top_k=top_k, last_assistant=None)
+                docs = retrieve_docs(
+                    query=question,
+                    course=course,
+                    top_k=top_k,
+                    retriever_type=RETRIEVER_TYPE,
+                    last_assistant=None,
+                    learner_level=None,
+                )
                 context = build_context(docs)
 
                 for condition in ["baseline", "accessible"]:
@@ -204,6 +214,7 @@ def main():
                             "condition": condition,
                             "temperature": temperature,
                             "top_k": top_k,
+                            "retriever_type": RETRIEVER_TYPE.value,
                             "latency_ms": f"{latency_ms:.2f}",
                             "response": answer,
                         }

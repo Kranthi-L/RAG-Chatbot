@@ -6,7 +6,7 @@ The goal of this project is to **reproduce and extend** the ideas from
 **“A Comparative Study of Retrieval-Augmented Generation (RAG) Chatbots”**  
 by evaluating how different large language models (LLMs) perform when grounded on the same domain corpus using a consistent Retrieval-Augmented Generation (RAG) pipeline.
 
-This project compares **GPT-4o-mini (OpenAI)** and **Claude-3.5 (Anthropic)** on academic textbooks and measures how accurately they answer questions using only retrieved context.
+This project compares **GPT-5 (OpenAI)** and **Claude-3.5 (Anthropic)** on academic textbooks and measures how accurately they answer questions using only retrieved context.
 
 ---
 
@@ -25,19 +25,7 @@ This project explores:
 2. Whether the chatbot can handle **follow-up questions** using conversational context.
 3. How the results compare to the findings in the reference paper.
 
----
 
-## 🧠 Overview of Project Phases
-
-| Phase       | Description                                                                                                           | Status       |
-| ----------- | --------------------------------------------------------------------------------------------------------------------- | ------------ |
-| **Phase 1** | Build a RAG chatbot using course textbooks, compare GPT and Claude using evaluation metrics (ROUGE, BLEU, BERTScore). | ✅ Completed |
-| **Phase 2** | Add accessibility features like speech input/output and visual customization for differently-abled learners.          | 🚧 Planned   |
-| **Phase 3** | Implement adaptive learning capabilities for personalized educational experiences.                                    | 🚧 Planned   |
-
-This phase (Phase 1) reproduces the paper’s experimental setup and extends it with persistent sessions, follow-up question reasoning, and a web-based interface.
-
----
 
 ## 📄 Reference Paper
 
@@ -54,32 +42,11 @@ Your implementation follows the same methodology and achieves results within the
 
 ---
 
-## 🚀 Current Progress and Achievements
-
-✅ Indexed two full textbooks:
-
-- _Computer Networking: A Top-Down Approach_
-- _Computer Architecture: A Quantitative Approach_
-
-✅ Built a complete RAG pipeline (Ingestion → Embedding → Retrieval → Generation).  
-✅ Compared GPT vs Claude quantitatively using ROUGE, BLEU, and BERTScore.  
-✅ Implemented persistent conversation sessions and follow-up question understanding.  
-✅ Created both a Command-Line Interface (CLI) and a Streamlit web app.  
-✅ Achieved metric results consistent with those reported in the paper.  
-✅ **Added comprehensive accessibility features:**
-  - Speech-to-Text (STT) using OpenAI Whisper with automatic silence detection
-  - Text-to-Speech (TTS) using Edge TTS with configurable speech rate (100-300 WPM, default 200)
-  - Continuous listening mode with state management for seamless voice interaction
-  - Visual accessibility: Light/Dark/High Contrast themes and adjustable font sizes
-  - Modality selector: Switch between Speech and Text input modes
-  - Auto-speak in Speech mode: Responses automatically read aloud after voice queries
-  - LaTeX formula cleaning for TTS: Formulas converted to readable text for natural speech
-
 **Evaluation Summary (Networking Dataset):**
 
 | Model       | ROUGE-L | BLEU-4 | BERTScore (F1) | Interpretation                                  |
 | ----------- | ------- | ------ | -------------- | ----------------------------------------------- |
-| GPT-4o-mini | 0.169   | 2.80   | 0.843          | Strong semantic match; close to ideal phrasing. |
+| GPT-5       | 0.169   | 2.80   | 0.843          | Strong semantic match; close to ideal phrasing. |
 | Claude-3.5  | 0.145   | 2.51   | 0.833          | Semantically accurate; phrasing more narrative. |
 
 ---
@@ -203,80 +170,72 @@ networking_metrics.csv — computed ROUGE, BLEU, and BERTScore metrics.
 
 Console summary showing average scores per model.
 
-📊 Evaluation Metrics Explained
-Metric Purpose Interpretation
-ROUGE-1/2/L Word and phrase overlap between model and ideal answers. High values = similar phrasing.
-BLEU-1/4 N-gram precision, measures exact phrase matches. High values = closer wording.
-BERTScore (F1) Semantic similarity using contextual embeddings. High values = meaning preserved even if rephrased.
-
-In explanatory Q&A, high BERTScore (≥0.8) but moderate ROUGE/BLEU indicates correct meaning with varied wording — the expected pattern in RAG chatbot evaluations.
-
-📈 Results Summary
-
-Both GPT and Claude achieved semantic similarity (BERTScore ≈ 0.83–0.84), aligning with the paper’s reported results.
-
-GPT scored slightly higher on ROUGE and BLEU, showing tighter phrasing adherence.
-
-Follow-up question support enables pronoun resolution (“that,” “it,” “this”) and true multi-turn reasoning.
-
-Metrics validate that your chatbot performs comparably to the paper’s systems.
-
-🧠 Features Implemented
-Feature Description Status
-PDF ingestion & vector DB Converts textbooks to searchable embeddings. ✅
-RAG pipeline Retrieve relevant context and generate grounded answers. ✅
-Multi-model comparison GPT vs Claude under identical setup. ✅
-Evaluation metrics Automatic scoring (ROUGE, BLEU, BERTScore). ✅
-Session persistence Save and resume chats by session ID. ✅
-Follow-up understanding Summarize and rewrite follow-up questions. ✅
-Streamlit web UI Interactive, user-friendly interface. ✅
-Speech-to-Text (STT) Voice input using OpenAI Whisper with silence detection. ✅
-Text-to-Speech (TTS) Edge TTS with auto-speak in Speech mode, manual playback via speaker icons. ✅
-Continuous Listening Automatic speech input with state management (idle/listening/processing/speaking). ✅
-Visual Accessibility Light/Dark/High Contrast themes and adjustable font sizes. ✅
-Modality Selection Switch between Speech and Text input modes with automatic TTS in Speech mode. ✅
-Adaptive learning Personalized tutoring and progress tracking. 🚧 Phase 3
-🔭 Next Phases
-Phase 2 — Enhanced Accessibility & Multimodality
-
-Goal: Further improve accessibility and add advanced multimodal features.
-
-✅ **Completed in Phase 1:**
-- 🗣️ Speech-to-Text (STT): Convert spoken questions to text (Whisper with silence detection)
-- 🔊 Text-to-Speech (TTS): Read out chatbot responses (Edge TTS with configurable rate)
-- 🎨 Visual Accessibility: Font resizing, color contrast modes, and high-contrast UI
-- 🔄 Continuous Listening: Automatic speech input with state management
-
-🚧 **Remaining for Phase 2:**
-- ♿ Keyboard-only navigation and ARIA labels for accessibility compliance
-- 🌐 Multi-language support for STT/TTS
-- 📱 Mobile-responsive design improvements
-
-Phase 3 — Adaptive Learning & Analytics
-
-Goal: Turn the chatbot into a personalized learning companion.
-
-📈 Track user performance across sessions.
-
-🎯 Identify weak topics and generate targeted follow-up questions.
-
-🧩 Dynamically adjust explanation depth and difficulty.
-
-📚 Integrate analytics dashboard for instructors.
 
 ---
 
-## 🔧 Quick Reference: Models and Technologies
+# 🧭 Quick Reference (What Each File Does)
 
-| Component | Technology/Model | Details |
-|-----------|------------------|---------|
-| **Embeddings** | sentence-transformers/all-MiniLM-L6-v2 | 384-dim, normalized, HuggingFace |
-| **Vector DB** | ChromaDB | Persistent, cosine similarity |
-| **Text Splitter** | RecursiveCharacterTextSplitter | 1200 chars, 200 overlap |
-| **LLM 1** | GPT-4o-mini | OpenAI, temperature=0.0, max_tokens=700 |
-| **LLM 2** | Claude-3.5-Sonnet-20241022 | Anthropic, temperature=0.0 |
-| **STT** | OpenAI Whisper (base) | 16kHz, silence detection, 60s max duration |
-| **TTS** | Edge TTS (primary) / macOS `say` (fallback) | 200 words/min default, 100-300 WPM range |
-| **Evaluation** | ROUGE-L, BLEU-4, BERTScore | rouge-score, sacrebleu, bert-score |
-| **Framework** | Streamlit, LangChain | Web UI, RAG pipeline |
-| **PDF Processing** | PyPDFLoader, pypdf | Text extraction |
+**Core RAG**
+- `rag_core.py`: Vector store/BM25 loaders; retrievers (dense, bm25, hybrid, section_aware); learner-level personalization (beginner=12, intermediate=base, advanced=4) with rerank; generation style instructions. Functions: `retrieve_docs`, `build_context`, `answer_with_model`, `ask_gpt`, `ask_claude`.
+- `ingest.py`: Load PDFs/PPTX from `data/<course>/`, chunk, tag metadata (`course`, `filename`, `page`, `level`, `concept_type`), build Chroma and per-course BM25 (`chroma_db/bm25_*.pkl`).
+- `course_utils.py`: Discover courses from `data/`.
+
+**Apps**
+- `app_web.py`: Streamlit UI; pick backend, course, retriever type, learner level, top_k, temperature; uses `rag_core`.
+- `app_cli.py`: CLI chat via shared RAG pipeline.
+
+**Batch Q&A + Judging**
+- `eval/run_batch_eval.py`: Flags `--course --retriever_type --top_k --temperature --learner_level --max_workers --debug_first_n`. Outputs `filled_<course>_temp..._topk..._<retriever><level>.csv` with responses, timings, num_chunks, context_chars, retriever_type, learner_level. Prereq: run `ingest.py`.
+- `eval/run_llm_judge.py`: LLM correctness judge → `judged_*.csv`.
+- `eval/eval_metrics.py`: Aggregates judged files (dense/hybrid/bm25/section_aware) → `summary_metrics.csv`; infers retriever_type from filename.
+
+**Retrieval Evaluation**
+- `eval/build_relevance_labels.py`: LLM relevance scores → `eval/data/relevance_labels.jsonl` (labels 0/1/2, hybrid default).
+- `eval/run_retrieval_eval.py`: Recall@k, MRR, nDCG per retriever/k → `eval/retrieval_metrics.csv`.
+
+**Accessibility Pipeline**
+- `eval/accessibility/build_accessibility_inputs.py`: Prepares judge inputs.
+- `eval/accessibility/run_accessibility_judge.py`: Accessibility judge, preserves `retriever_type` → `accessibility_results.csv`.
+- `eval/accessibility/select_best_configs.py`: Picks best (course, model) configs, currently filtered to `retriever_type=="hybrid"` → `best_configs_for_accessibility.csv`.
+- `eval/accessibility/analyze_accessibility.py`: Summaries/plots.
+
+**Ablation (Prompt Accessibility Study)**
+- `eval/ablation/ablation_generate_answers.py`: Hybrid retrieval (top_k=8) baseline vs accessible answers → `ablation_answers.csv`.
+- `eval/ablation/ablation_run_accessibility_judge.py`: Judges accessibility/correctness → `ablation_accessibility_results.csv`.
+- `eval/ablation/ablation_analyze.py`: Summaries/plots → CSVs + `figures_ablation/`.
+
+**Simulation / Adaptive (Prototype)**
+- `adaptive/learner_model.py`, `adaptive/adaptive_answer.py`, `adaptive/simulate_learners.py`, `adaptive/inspect_simulations.py`: Exploratory; not used in main results.
+
+**Plotting**
+- `plots/generate_plots.py`: Builds figures from `summary_metrics.csv` into `figures/`.
+
+**Scripts for Phase 3**
+- `run_phase3_hybrid_evals.sh`: Runs hybrid batch evals (top_k=8, temps {0.2,0.5,0.8}, all courses, max_workers=1).
+
+---
+
+# ▶️ How to Run (Typical Workflow)
+1) **Ingest corpus**: `python ingest.py` (needs PDFs/PPTX in `data/<course>/`; outputs `chroma_db/`, BM25 pkls).
+2) **Generate answers (hybrid example)**: `bash run_phase3_hybrid_evals.sh` → `filled_*_hybrid.csv`.
+3) **Judge correctness**: `python -m eval.run_llm_judge` → `judged_*_hybrid.csv`.
+4) **Aggregate metrics**: `python -m eval.eval_metrics` → `summary_metrics.csv`.
+5) **Pick best accessibility configs (hybrid)**: `python -m eval.accessibility.select_best_configs` → `best_configs_for_accessibility.csv`.
+6) **Accessibility judging**: `python -m eval.accessibility.run_accessibility_judge` → `accessibility_results.csv`.
+7) **Plotting**: `python plots/generate_plots.py` → `figures/*.png`.
+8) **Ablation (optional)**: generate/judge/analyze via scripts in `eval/ablation/`.
+9) **Web app**: `streamlit run app_web.py` (after ingestion); choose course, retriever type, learner level, top_k, temperature.
+
+---
+
+# ✅ Outputs Cheat Sheet
+- `chroma_db/`: Chroma + BM25 indexes.
+- `filled_*.csv`: Model responses, timings, retriever_type, learner_level, num_chunks, context_chars.
+- `judged_*.csv`: LLM judge scores.
+- `summary_metrics.csv`: Aggregated metrics (bleu, rouge_l, bert_sim, avg_judge_score, retriever_type).
+- `relevance_labels.jsonl`: Retrieval labels.
+- `retrieval_metrics.csv`: Recall@k, MRR, nDCG per retriever/k.
+- `best_configs_for_accessibility.csv`: Current best (hybrid) configs.
+- `accessibility_results.csv`: Accessibility judge outputs.
+- `figures/*.png`: Plots from summary_metrics.
+- Ablation: `ablation_answers.csv`, `ablation_accessibility_results.csv`, `ablation_summary_by_model_condition.csv`, `ablation_deltas_*.csv`, `figures_ablation/*`.

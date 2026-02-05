@@ -3,7 +3,9 @@ import os
 import glob
 import json
 import shutil
-from typing import List, Optional
+import pickle
+from enum import Enum
+from typing import List, Optional, Tuple
 
 from dotenv import load_dotenv
 from pypdf import PdfReader
@@ -14,6 +16,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
+from rank_bm25 import BM25Okapi
 
 def sanitize_text(s: str) -> str:
     """Return a UTF-8 safe version of s, replacing invalid surrogates/etc."""
@@ -37,6 +40,36 @@ embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2",
     encode_kwargs={"normalize_embeddings": True}
 )
+
+
+class DifficultyLevel(str, Enum):
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+
+class ConceptType(str, Enum):
+    DEFINITION = "definition"
+    EXAMPLE = "example"
+    INTUITION = "intuition"
+    PROCEDURE = "procedure"
+    OTHER = "other"
+
+
+USE_LLM_TAGGER = False  # placeholder for future tagging
+
+
+def tag_chunk_level_and_type(text: str) -> Tuple[DifficultyLevel, ConceptType]:
+    """
+    Lightweight tagging hook. Currently returns defaults; can be replaced with LLM-based tagging.
+    """
+    _ = text
+    return DifficultyLevel.INTERMEDIATE, ConceptType.OTHER
+
+
+def _tokenize(text: str) -> List[str]:
+    return (text or "").lower().split()
+
 
 # ---- Helpers ----------------------------------------------------------------
 def parse_ranges(spec: str, max_pages: int) -> List[int]:
@@ -232,6 +265,45 @@ for doc in clean_chunks:
                 doc.metadata[k] = sanitize_text(v)
 
 print(f"Sanitized UTF-8 for {sanitized_docs} document(s) before indexing.")
+
+# ---- Tag difficulty level and concept type; assign chunk indices -----------
+for idx, doc in enumerate(clean_chunks):
+    level, ctype = tag_chunk_level_and_type(doc.page_content)
+    doc.metadata["level"] = level.value
+    doc.metadata["concept_type"] = ctype.value
+    doc.metadata["chunk_index"] = idx
+
+# ---- Build BM25 indices per course -----------------------------------------
+bm25_by_course: dict[str, Tuple[BM25Okapi, List[dict]]] = {}
+docs_by_course: dict[str, List[Document]] = {}
+for d in clean_chunks:
+    course = d.metadata.get("course", "unknown")
+    docs_by_course.setdefault(course, []).append(d)
+
+for course, docs in docs_by_course.items():
+    tokenized = [_tokenize(d.page_content) for d in docs]
+    bm25 = BM25Okapi(tokenized)
+    bm25_records = []
+    for d in docs:
+        rec = {
+            "doc_id": f"{d.metadata.get('course')}|{d.metadata.get('filename')}|{d.metadata.get('page')}|{d.metadata.get('chunk_index')}",
+            "text": d.page_content,
+            "metadata": d.metadata,
+        }
+        bm25_records.append(rec)
+
+    bm25_by_course[course] = (bm25, bm25_records)
+
+# Persist BM25 artifacts
+for course, (bm25, bm25_records) in bm25_by_course.items():
+    idx_path = os.path.join(DB_DIR, f"bm25_{course}.pkl")
+    docs_path = os.path.join(DB_DIR, f"bm25_docs_{course}.pkl")
+    os.makedirs(DB_DIR, exist_ok=True)
+    with open(idx_path, "wb") as f:
+        pickle.dump(bm25, f)
+    with open(docs_path, "wb") as f:
+        pickle.dump(bm25_records, f)
+    print(f"Saved BM25 index for course '{course}' with {len(bm25_records)} docs -> {idx_path}")
 
 # ---- Build / persist Chroma index -------------------------------------------
 # Pass an Embeddings object (not a raw function) for compatibility

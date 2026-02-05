@@ -168,6 +168,9 @@ def main():
     for col in required_cols:
         if col not in df.columns:
             raise ValueError(f"Required column '{col}' not found in {INPUT_CSV}")
+    # Ensure retriever_type present (forwarded from best-configs); fallback to 'dense'
+    if "retriever_type" not in df.columns:
+        df["retriever_type"] = "dense"
 
     rows = df.to_dict(orient="records")
     results: List[Dict[str, Any]] = []
@@ -179,6 +182,7 @@ def main():
         course = row.get("course")
         model = row.get("model")
         qid = row.get("question_id")
+        retriever = row.get("retriever_type", "dense")
         question = str(row.get("question", ""))
         answer = str(row.get("answer", ""))
 
@@ -219,6 +223,8 @@ def main():
             result_row["justification_tts"] = None
             result_row["justification_cognitive"] = None
             result_row["justification_learning_difficulties"] = None
+        # Ensure retriever_type is preserved
+        result_row["retriever_type"] = retriever
 
         results.append(result_row)
 

@@ -10,23 +10,22 @@ from typing import Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
-from langchain_community.vectorstores import Chroma
-
-# Prompting
 from langchain_core.prompts import ChatPromptTemplate
-
-# LLMs
 from langchain_openai import ChatOpenAI
-from langchain_huggingface import HuggingFaceEmbeddings
 import anthropic
 from anthropic import NotFoundError
+
+from rag_core import (
+    retrieve_docs,
+    build_context,
+    RetrieverType,
+)
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BASE_DIR.parent
 
-DB_DIR = os.getenv("DB_DIR") or str(REPO_ROOT / "chroma_db")
 SYSTEM_PATH = os.getenv("SYSTEM_PROMPT") or str(REPO_ROOT / "prompts/qa_system.md")
 DEFAULT_COURSE = os.getenv("COURSE", "networking")
 
@@ -74,47 +73,6 @@ def read_system() -> str:
     except:
         return ("You are a course Q&A assistant. Answer ONLY using the provided context.\n"
                 "If the answer is not in the context, reply exactly: \"I don’t know based on the provided material.\"")
-
-def build_context(docs) -> str:
-    """
-    Optimization 5: Build context with length limits to prevent token limit issues.
-    Limits total context to ~8000 characters (roughly 2000 tokens).
-    """
-    blocks = []
-    total_chars = 0
-    max_context_chars = 8000  # Conservative limit to stay well under token limits
-    
-    for i, d in enumerate(docs, 1):
-        src  = d.metadata.get("filename") or os.path.basename(d.metadata.get("source", ""))
-        page = d.metadata.get("page", "?")
-        course = d.metadata.get("course") or d.metadata.get("book", "unknown")
-        block = f"[{i}] {d.page_content}\n(Source: {src}, p.{page}, course:{course})"
-        
-        # Check if adding this block would exceed limit
-        block_size = len(block) + 2  # +2 for "\n\n" separator
-        if total_chars + block_size > max_context_chars and blocks:
-            # Stop adding chunks if we'd exceed the limit
-            break
-        
-        blocks.append(block)
-        total_chars += block_size
-    
-    return "\n\n".join(blocks)
-
-def get_vs():
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        encode_kwargs={"normalize_embeddings": True},
-    )
-    return Chroma(persist_directory=DB_DIR, embedding_function=embeddings)
-
-def retrieve(vs, q: str, k: int, course: Optional[str]):
-    filt = None if not course or course == "all" else {"course": {"$eq": course}}
-    try:
-        docs = vs.similarity_search(q, k=k) if filt is None else vs.similarity_search(q, k=k, filter=filt)
-    except Exception:
-        docs = []
-    return docs
 
 def ask_gpt(system: str, q: str, ctx: str) -> Tuple[str, float]:
     # Use cached LLM instance instead of creating new one
@@ -179,6 +137,11 @@ def save_rows(path: str, rows: List[Dict[str, str]]):
         "ideal_answer",
         "gpt_ms",
         "claude_ms",
+        "retriever_type",
+        "learner_level",
+        "num_chunks",
+        "context_chars",
+        "had_error",
     ]
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -186,59 +149,88 @@ def save_rows(path: str, rows: List[Dict[str, str]]):
         for r in rows:
             w.writerow(r)
 
-def process_question(r: Dict[str, str], index: int, total: int, system: str, vs: Chroma, course: str) -> Dict[str, str]:
+def process_question(
+    r: Dict[str, str],
+    index: int,
+    total: int,
+    system: str,
+    course: str,
+    retriever: RetrieverType,
+    learner_level: Optional[str],
+) -> Dict[str, str]:
     """
     Optimization 2: Process a single question (can be run in parallel).
     Returns a dictionary with the question and responses.
     """
-    q = r["question"].strip()
-    if not q or q.startswith("#"):
-        # Skip empty or chapter header lines
-        return {
-            "_skip": True,
-            "_index": index
+    try:
+        q = r["question"].strip()
+        if not q or q.startswith("#"):
+            return {"_skip": True, "_index": index}
+
+        ideal = r["ideal_answer"].strip()
+        gpt_text = r.get("gpt_response", "").strip()
+        claude_text = r.get("claude_response", "").strip()
+
+        docs = retrieve_docs(
+            query=q,
+            course=course,
+            top_k=current_args.top_k,
+            retriever_type=retriever,
+            learner_level=learner_level,
+        )
+        ctx = "(No retrieved context.)" if not docs else build_context(docs)
+        num_chunks = len(docs)
+        context_chars = len(ctx)
+
+        gpt_ms = ""
+        claude_ms = ""
+        if RUN_GPT:
+            try:
+                gpt_text, gpt_latency = ask_gpt(system, q, ctx)
+                gpt_ms = f"{gpt_latency:.0f}"
+            except Exception as e:
+                gpt_text = f"[GPT ERROR] {e}"
+        if RUN_CLAUDE:
+            time.sleep(PAUSE)
+            try:
+                claude_text, claude_latency = ask_claude(system, q, ctx)
+                claude_ms = f"{claude_latency:.0f}"
+            except Exception as e:
+                claude_text = f"[CLAUDE ERROR] {e}"
+
+        result = {
+            "question": q,
+            "gpt_response": gpt_text,
+            "claude_response": claude_text,
+            "ideal_answer": ideal,
+            "gpt_ms": gpt_ms,
+            "claude_ms": claude_ms,
+            "retriever_type": retriever.value,
+            "learner_level": learner_level if learner_level else "none",
+            "num_chunks": num_chunks,
+            "context_chars": context_chars,
+            "had_error": False,
+            "_index": index,
         }
-    ideal = r["ideal_answer"].strip()
-    gpt_text = r.get("gpt_response", "").strip()
-    claude_text = r.get("claude_response", "").strip()
-
-    # retrieve context
-    docs = retrieve(vs, q, current_args.top_k, course)
-    if not docs:
-        ctx = "(No retrieved context.)"
-    else:
-        ctx = build_context(docs)
-
-    # fill responses
-    gpt_ms = ""
-    claude_ms = ""
-    if RUN_GPT:
-        try:
-            gpt_text, gpt_latency = ask_gpt(system, q, ctx)
-            gpt_ms = f"{gpt_latency:.0f}"
-        except Exception as e:
-            gpt_text = f"[GPT ERROR] {e}"
-    if RUN_CLAUDE:
-        # Small delay to avoid rate limits (still needed even in parallel)
-        time.sleep(PAUSE)
-        try:
-            claude_text, claude_latency = ask_claude(system, q, ctx)
-            claude_ms = f"{claude_latency:.0f}"
-        except Exception as e:
-            claude_text = f"[CLAUDE ERROR] {e}"
-
-    result = {
-        "question": q,
-        "gpt_response": gpt_text,
-        "claude_response": claude_text,
-        "ideal_answer": ideal,
-        "gpt_ms": gpt_ms,
-        "claude_ms": claude_ms,
-        "_index": index  # Preserve original order
-    }
-    
-    print(f"[{index}/{total}] done")
-    return result
+        print(f"[{index}/{total}] done")
+        return result
+    except Exception as e:
+        err_msg = str(e)
+        print(f"[ERROR] course={course} idx={index}: {err_msg}")
+        return {
+            "question": (r.get("question") or "").strip(),
+            "gpt_response": f"[ERROR: {err_msg}]",
+            "claude_response": f"[ERROR: {err_msg}]",
+            "ideal_answer": (r.get("ideal_answer") or "").strip(),
+            "gpt_ms": "",
+            "claude_ms": "",
+            "retriever_type": retriever.value,
+            "learner_level": learner_level if learner_level else "none",
+            "num_chunks": 0,
+            "context_chars": 0,
+            "had_error": True,
+            "_index": index,
+        }
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch evaluate Q&A for a selected course.")
@@ -260,6 +252,32 @@ def parse_args():
         default=4,
         help="Number of top retrieved chunks (top-k) in the RAG pipeline."
     )
+    parser.add_argument(
+        "--retriever_type",
+        type=str,
+        choices=[rt.value for rt in RetrieverType],
+        default=RetrieverType.DENSE.value,
+        help="Retriever to use: dense, bm25, hybrid, section_aware.",
+    )
+    parser.add_argument(
+        "--learner_level",
+        type=str,
+        choices=["beginner", "intermediate", "advanced", "none"],
+        default="none",
+        help="Optional learner level for reranking; 'none' disables rerank.",
+    )
+    parser.add_argument(
+        "--debug_first_n",
+        type=int,
+        default=None,
+        help="If set, only process the first N questions (useful with DEBUG_RETRIEVAL_LOG).",
+    )
+    parser.add_argument(
+        "--max_workers",
+        type=int,
+        default=1,
+        help="Number of workers. Use 1 to force sequential processing.",
+    )
     return parser.parse_args()
 
 def main():
@@ -267,56 +285,80 @@ def main():
     global current_args
     current_args = args
     course = args.course
+    retriever = RetrieverType(args.retriever_type)
+    if args.learner_level == "none":
+        learner_level = None
+    else:
+        learner_level = args.learner_level
 
     input_csv = os.getenv("INPUT_CSV", COURSE_TO_CSV[course])
     temp_tag = str(args.temperature).replace(".", "p")
-    output_csv_default = REPO_ROOT / "eval" / f"filled_{course}_temp{temp_tag}_topk{args.top_k}.csv"
+    retriever_tag = args.retriever_type or "dense"
+    level_tag = ""
+    if args.learner_level and args.learner_level != "none":
+        level_tag = {
+            "beginner": "_beg",
+            "intermediate": "_int",
+            "advanced": "_adv",
+        }.get(args.learner_level, "")
+    output_csv_default = REPO_ROOT / "eval" / f"filled_{course}_temp{temp_tag}_topk{args.top_k}_{retriever_tag}{level_tag}.csv"
     output_csv = os.getenv("OUTPUT_CSV", str(output_csv_default))
 
     system = read_system()
-    vs = get_vs()
     rows = load_rows(input_csv)
     
     # Optimization 2: Process questions in parallel using ThreadPoolExecutor
     out = []
     completed = 0
     
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Submit all tasks
-        future_to_index = {
-            executor.submit(process_question, r, i+1, len(rows), system, vs, course): i
-            for i, r in enumerate(rows)
-        }
-        
-        # Collect results as they complete (may finish out of order)
+    if args.max_workers == 1:
         results_dict = {}
-        for future in as_completed(future_to_index):
-            try:
-                result = future.result()
-                if result.get("_skip"):
-                    continue
-                results_dict[result["_index"]] = result
-                completed += 1
-            except Exception as e:
-                index = future_to_index[future]
-                print(f"[{index+1}/{len(rows)}] ERROR: {e}")
-                # Create error result
-                r = rows[index]
-                results_dict[index] = {
-                    "question": r["question"].strip(),
-                    "gpt_response": f"[ERROR] {e}",
-                    "claude_response": f"[ERROR] {e}",
-                    "ideal_answer": r["ideal_answer"].strip(),
-                    "gpt_ms": "",
-                    "claude_ms": "",
-                    "_index": index
-                }
-        
-        # Reconstruct output in original order
+        for i, r in enumerate(rows):
+            if args.debug_first_n is not None and i >= args.debug_first_n:
+                break
+            result = process_question(r, i + 1, len(rows), system, course, retriever, learner_level)
+            if result.get("_skip"):
+                continue
+            results_dict[result["_index"]] = result
         out = [results_dict[i] for i in sorted(results_dict.keys())]
-        # Remove temporary _index field
         for item in out:
             item.pop("_index", None)
+    else:
+        with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+            future_to_index = {
+                executor.submit(process_question, r, i+1, len(rows), system, course, retriever, learner_level): i
+                for i, r in enumerate(rows)
+                if args.debug_first_n is None or i < args.debug_first_n
+            }
+            
+            results_dict = {}
+            for future in as_completed(future_to_index):
+                try:
+                    result = future.result()
+                    if result.get("_skip"):
+                        continue
+                    results_dict[result["_index"]] = result
+                    completed += 1
+                except Exception as e:
+                    index = future_to_index[future]
+                    print(f"[{index+1}/{len(rows)}] ERROR: {e}")
+                    r = rows[index]
+                    results_dict[index] = {
+                        "question": r["question"].strip(),
+                        "gpt_response": f"[ERROR] {e}",
+                        "claude_response": f"[ERROR] {e}",
+                        "ideal_answer": r["ideal_answer"].strip(),
+                        "gpt_ms": "",
+                        "claude_ms": "",
+                        "retriever_type": retriever.value,
+                        "learner_level": learner_level if learner_level else "none",
+                        "had_error": True,
+                        "_index": index
+                    }
+            
+            out = [results_dict[i] for i in sorted(results_dict.keys())]
+            for item in out:
+                item.pop("_index", None)
 
     save_rows(output_csv, out)
     print(f"\n[{course}] Wrote {output_csv} with {len(out)} rows.")

@@ -1,0 +1,54 @@
+{
+  "demo|architecture": {
+    "user_id": "demo",
+    "course": "architecture",
+    "level": "beginner",
+    "num_questions": 4,
+    "recent_scores": [
+      0.6,
+      0.7,
+      0.9,
+      0.85
+    ],
+    "rolling_avg": 0.7625
+  },
+  "demo_user|architecture": {
+    "user_id": "demo_user",
+    "course": "architecture",
+    "level": "beginner",
+    "num_questions": 2,
+    "recent_scores": [
+      1.0,
+      1.0
+    ],
+    "rolling_avg": 1.0
+  },
+  "sim_user_adaptive|architecture": {
+    "user_id": "sim_user_adaptive",
+    "course": "architecture",
+    "level": "advanced",
+    "num_questions": 40,
+    "recent_scores": [
+      0.8,
+      1.0,
+      1.0,
+      0.5,
+      1.0
+    ],
+    "rolling_avg": 0.86
+  },
+  "sim_user_adaptive_default|architecture": {
+    "user_id": "sim_user_adaptive_default",
+    "course": "architecture",
+    "level": "advanced",
+    "num_questions": 30,
+    "recent_scores": [
+      0.8,
+      1.0,
+      1.0,
+      0.5,
+      1.0
+    ],
+    "rolling_avg": 0.86
+  }
+}

@@ -12,6 +12,8 @@ rouge-score
 sacrebleu
 bert-score
 sentence-transformers
+# Retrieval
+rank-bm25
 # Phase 2: Accessibility - Speech-to-Text
 openai-whisper
 sounddevice
@@ -20,3 +22,4 @@ scipy
 # Phase 2: Accessibility - Text-to-Speech
 edge-tts
 # pyttsx3  # Replaced with edge-tts for better quality
+rank_bm25
